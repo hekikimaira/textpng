@@ -17,14 +17,19 @@
   .canvas-wrap { position: relative; flex-shrink: 0; background: #000; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.5); }
   .canvas-wrap img { display: block; max-height: 82vh; max-width: min(100%, 600px); width: auto; height: auto; }
   .text-box {
-    position: absolute; cursor: grab; writing-mode: vertical-rl; text-orientation: mixed;
+    position: absolute; cursor: grab; writing-mode: vertical-rl; text-orientation: upright;
     white-space: pre-wrap; user-select: none; line-height: 1.6;
     font-family: 'M PLUS Rounded 1c', sans-serif; font-weight: 800; z-index: 10; padding: 4px;
+    font-feature-settings: "vrt2", "vert";
   }
   .text-box.active { outline: 2px dashed rgba(255,255,255,0.5); }
   .text-box.dragging { cursor: grabbing; opacity: 0.85; }
-  /* Rotate specific chars for proper vertical display */
-  .text-box .rot { display: inline-block; transform: rotate(90deg); transform-origin: center center; }
+  .vchar { display: inline; }
+  .vrot {
+    display: inline-block;
+    text-orientation: mixed;
+    position: relative;
+  }
   .ctrl {
     background: #16213e; border-radius: 10px; padding: 14px; min-width: 290px; max-width: 360px;
     display: flex; flex-direction: column; gap: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
@@ -91,7 +96,7 @@
       </div>
     </div>
     <div class="cg">
-      <label>テキスト内容</label>
+      <label>テキスト内容（テキスト枠をタップでも編集可）</label>
       <textarea id="ti" placeholder="ここに文字を入力"></textarea>
     </div>
     <div class="cg">
@@ -123,40 +128,67 @@
   </div>
 </div>
 <script>
-// Characters that need 90deg rotation in vertical writing
-const ROT_CHARS = new Set([
-  '…','‥','ー','〜','～','-','－','—','―','–',
-  '（','）','(',')','{','}','｛','｝','[',']','［','］',
-  '【','】','〔','〕','〈','〉','《','》','「','」','『','』',
-  '＜','＞','<','>',
-  '→','←','↑','↓','⇒','⇐','⇔',
-  '＝','=','≠','≒','≡',
-  '÷','×','±','∞',
-  '／','＼','/','\\',
-  '｜','|',
-  '＿','_','‐','‑','‒',
-  '．','，','.', ','
-]);
+// ---- Character rotation config ----
+// Each entry: { rotate: deg, dx: fraction of fontSize, dy: fraction of fontSize, scale: optional }
+// dx/dy are offsets as ratio of font size to fine-tune position after rotation
+const CHAR_CFG = {};
 
-// Check if char should be rotated
-function shouldRotate(ch) {
-  return ROT_CHARS.has(ch);
+// Ellipsis / dots - these are wide chars that need centering
+['…','‥'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0, dy: 0 });
+
+// Long vowel mark / dashes
+['ー','〜','～','—','―','–','－','-'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0, dy: 0 });
+
+// Brackets - open brackets shift up, close brackets shift down
+// CJK brackets
+['「','『','（','【','〔','〈','《','｛','［'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0, dy: 0 });
+['」','』','）','】','〕','〉','》','｝','］'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0, dy: 0 });
+
+// Half-width brackets
+['(','[','{','<'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0.1, dy: -0.1 });
+[')',']','}','>'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: -0.1, dy: 0.1 });
+
+// Arrows
+['→','←','↑','↓','⇒','⇐','⇔'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0, dy: 0 });
+
+// Math / symbols
+['＝','=','≠','≒','≡','÷','×','±','∞'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0, dy: 0 });
+
+// Slashes
+['／','＼','/','\\'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0, dy: 0 });
+
+// Small punctuation - comma/period half-width need different treatment
+['．','，'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0.2, dy: -0.2 });
+['.', ','].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0.25, dy: -0.25 });
+
+// Pipe
+['｜','|'].forEach(c => CHAR_CFG[c] = { rot: 0, dx: 0, dy: 0 }); // already vertical
+
+// Underscore/hyphen
+['＿','_','‐','‑','‒'].forEach(c => CHAR_CFG[c] = { rot: 90, dx: 0, dy: 0 });
+
+function getCfg(ch) { return CHAR_CFG[ch] || null; }
+
+function escHTML(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Build innerHTML with rotation spans
-function buildVerticalHTML(text) {
+// Build vertical HTML using CSS transforms for rotated chars
+function buildVerticalHTML(text, fontSize) {
   let html = '';
   const chars = Array.from(text);
   for (const ch of chars) {
     if (ch === '\n') {
       html += '<br>';
-    } else if (shouldRotate(ch)) {
-      // Don't rotate - these are already handled by text-orientation upright
-      // Actually we need the OPPOSITE: force sideways for these chars
-      // In vertical-rl + text-orientation:mixed, CJK is upright, latin is sideways
-      // But …ー etc are treated as upright by mixed, we want them rotated
-      // We'll use text-combine-upright or just manually rotate
-      html += '<span style="display:inline-block;text-orientation:sideways;">' + escHTML(ch) + '</span>';
+      continue;
+    }
+    const cfg = getCfg(ch);
+    if (cfg && cfg.rot !== 0) {
+      const dxPx = (cfg.dx || 0) * fontSize;
+      const dyPx = (cfg.dy || 0) * fontSize;
+      html += '<span class="vrot" style="' +
+        'transform: rotate(' + cfg.rot + 'deg) translate(' + dxPx + 'px, ' + dyPx + 'px);' +
+        '">' + escHTML(ch) + '</span>';
     } else {
       html += escHTML(ch);
     }
@@ -164,160 +196,200 @@ function buildVerticalHTML(text) {
   return html;
 }
 
-function escHTML(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
 const DEFAULTS = [
   {text:'\u300c\u305d\u3046\u3001\u305d\u308c\u3067\uff1f\u300d\n\u3044\u308a\u3059\u306e\u76ee\u304c\u50d5\u3092\u898b\u3064\u3081\u308b\u2026\u3002',x:20,y:20,fs:28,ls:2,lh:1.6,c:'#ffffff',sw:2,sc:'#000000',fw:800,vis:true},
-  {text:'\u3042\u3042\u30fc\u50d5\u306f\u300c\u751f\u304d\u6b8b\u308c\u308b\u300d\u306e\u304b\n\u305d\u308c\u3068\u3082\u300c\u3053\u306e\u307e\u307e\u300d\u3053\u3053\u3067',x:200,y:20,fs:24,ls:2,lh:1.6,c:'#ffffff',sw:2,sc:'#000000',fw:800,vis:false}
+  {text:'\u3042\u3042\u30fc\u50d5\u306f\u300c\u751f\u304d\u6b8b\u308c\u308b\u300d\u306e\u304b\n\u305d\u308c\u3068\u3082\u300c\u3053\u306e\u307e\u307e\u300d\u3053\u3053\u3067',x:200,y:20,fs:24,ls:2,lh:1.6,c:'#ffffff',sw:2,sc:'#000000',fw:800,vis:true}
 ];
 
-// Load from localStorage or use defaults
 function loadState() {
   try {
-    const saved = localStorage.getItem('textOverlayState');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length === 2) return parsed;
-    }
+    const s = localStorage.getItem('textOverlayState_v2');
+    if (s) { const p = JSON.parse(s); if (Array.isArray(p) && p.length === 2) return p; }
   } catch(e) {}
   return JSON.parse(JSON.stringify(DEFAULTS));
 }
-
 function saveState() {
   try {
-    localStorage.setItem('textOverlayState', JSON.stringify(B));
+    localStorage.setItem('textOverlayState_v2', JSON.stringify(B));
     const el = document.getElementById('saveStatus');
-    el.textContent = '保存しました';
-    el.style.color = '#6aaf6a';
+    el.textContent = '保存しました'; el.style.color = '#6aaf6a';
     clearTimeout(saveState._t);
-    saveState._t = setTimeout(() => { el.textContent = '設定は自動保存されます'; el.style.color = '#4a6a4a'; }, 1500);
+    saveState._t = setTimeout(() => { el.textContent = '設定は自動保存されます'; el.style.color = '#4a6a4a'; }, 1200);
   } catch(e) {}
 }
-
-// Debounced save
-let saveTimer = null;
-function debounceSave() {
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(saveState, 400);
-}
+let svT = null;
+function dsave() { clearTimeout(svT); svT = setTimeout(saveState, 400); }
 
 const B = loadState();
-let ab=0, drag=false, dx=0, dy=0;
-const cw=document.getElementById('cw'), img=document.getElementById('img');
-const els=[];
-for(let i=0;i<2;i++){const e=document.createElement('div');e.className='text-box';e.dataset.i=i;cw.appendChild(e);els.push(e);}
+let ab = 0, drag = false, dx = 0, dy = 0;
+let dragStartTime = 0, dragMoved = false;
 
-document.getElementById('fi').addEventListener('change',e=>{const f=e.target.files[0];if(f)loadImg(f);});
-const ua=document.getElementById('ua');
-ua.addEventListener('dragover',e=>{e.preventDefault();ua.style.borderColor='#6a6aaf';});
-ua.addEventListener('dragleave',()=>{ua.style.borderColor='#3a3a6a';});
-ua.addEventListener('drop',e=>{e.preventDefault();ua.style.borderColor='#3a3a6a';const f=e.dataTransfer.files[0];if(f&&f.type.startsWith('image/'))loadImg(f);});
-function loadImg(f){const r=new FileReader();r.onload=e=>{img.src=e.target.result;ua.textContent=f.name;};r.readAsDataURL(f);}
-
-const ti=document.getElementById('ti'),fsEl=document.getElementById('fs'),lsEl=document.getElementById('ls'),lhEl=document.getElementById('lh'),tcEl=document.getElementById('tc'),swEl=document.getElementById('sw'),scEl=document.getElementById('sc'),fwEl=document.getElementById('fw');
-ti.addEventListener('input',()=>{B[ab].text=ti.value;render();debounceSave();});
-fsEl.addEventListener('input',()=>{B[ab].fs=+fsEl.value;document.getElementById('fsv').textContent=fsEl.value;render();debounceSave();});
-lsEl.addEventListener('input',()=>{B[ab].ls=+lsEl.value;document.getElementById('lsv').textContent=lsEl.value;render();debounceSave();});
-lhEl.addEventListener('input',()=>{B[ab].lh=+lhEl.value/10;document.getElementById('lhv').textContent=(+lhEl.value/10).toFixed(1);render();debounceSave();});
-tcEl.addEventListener('input',()=>{B[ab].c=tcEl.value;render();debounceSave();});
-swEl.addEventListener('input',()=>{B[ab].sw=+swEl.value;document.getElementById('swv').textContent=swEl.value;render();debounceSave();});
-scEl.addEventListener('input',()=>{B[ab].sc=scEl.value;render();debounceSave();});
-fwEl.addEventListener('input',()=>{B[ab].fw=+fwEl.value;document.getElementById('fwv').textContent=fwEl.value;render();debounceSave();});
-
-function sel(i){ab=i;document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.querySelector('.tab[data-b="'+i+'"]').classList.add('on');lc();render();}
-function lc(){
-  const b=B[ab];
-  ti.value=b.text;
-  fsEl.value=b.fs; document.getElementById('fsv').textContent=b.fs;
-  lsEl.value=b.ls; document.getElementById('lsv').textContent=b.ls;
-  lhEl.value=Math.round(b.lh*10); document.getElementById('lhv').textContent=b.lh.toFixed(1);
-  tcEl.value=b.c;
-  swEl.value=b.sw; document.getElementById('swv').textContent=b.sw;
-  scEl.value=b.sc;
-  fwEl.value=b.fw; document.getElementById('fwv').textContent=b.fw;
-  document.getElementById('tb').textContent=b.vis?'非表示':'表示';
+const cw = document.getElementById('cw'), img = document.getElementById('img');
+const els = [];
+for (let i = 0; i < 2; i++) {
+  const e = document.createElement('div'); e.className = 'text-box'; e.dataset.i = i;
+  cw.appendChild(e); els.push(e);
 }
-function tog(){B[ab].vis=!B[ab].vis;document.getElementById('tb').textContent=B[ab].vis?'非表示':'表示';render();debounceSave();}
-function rst(){B[ab].x=ab*180+20;B[ab].y=20;render();debounceSave();}
 
-function render(){
-  for(let i=0;i<2;i++){
-    const b=B[i],e=els[i];
-    if(!b.vis){e.style.display='none';continue;}
-    e.style.display='block';e.style.left=b.x+'px';e.style.top=b.y+'px';
-    e.style.fontSize=b.fs+'px';e.style.letterSpacing=b.ls+'px';e.style.lineHeight=b.lh;
-    e.style.color=b.c;e.style.fontWeight=b.fw;
-    if(b.sw>0){
-      e.style.webkitTextStroke=b.sw+'px '+b.sc;
-      e.style.paintOrder='stroke fill';
-    }else{
-      e.style.webkitTextStroke='none';
+document.getElementById('fi').addEventListener('change', e => { const f = e.target.files[0]; if (f) loadImg(f); });
+const ua = document.getElementById('ua');
+ua.addEventListener('dragover', e => { e.preventDefault(); ua.style.borderColor = '#6a6aaf'; });
+ua.addEventListener('dragleave', () => { ua.style.borderColor = '#3a3a6a'; });
+ua.addEventListener('drop', e => { e.preventDefault(); ua.style.borderColor = '#3a3a6a'; const f = e.dataTransfer.files[0]; if (f && f.type.startsWith('image/')) loadImg(f); });
+function loadImg(f) { const r = new FileReader(); r.onload = e => { img.src = e.target.result; ua.textContent = f.name; }; r.readAsDataURL(f); }
+
+const ti = document.getElementById('ti');
+const fsEl = document.getElementById('fs'), lsEl = document.getElementById('ls'), lhEl = document.getElementById('lh');
+const tcEl = document.getElementById('tc'), swEl = document.getElementById('sw'), scEl = document.getElementById('sc'), fwEl = document.getElementById('fw');
+
+ti.addEventListener('input', () => { B[ab].text = ti.value; render(); dsave(); });
+fsEl.addEventListener('input', () => { B[ab].fs = +fsEl.value; document.getElementById('fsv').textContent = fsEl.value; render(); dsave(); });
+lsEl.addEventListener('input', () => { B[ab].ls = +lsEl.value; document.getElementById('lsv').textContent = lsEl.value; render(); dsave(); });
+lhEl.addEventListener('input', () => { B[ab].lh = +lhEl.value / 10; document.getElementById('lhv').textContent = (+lhEl.value / 10).toFixed(1); render(); dsave(); });
+tcEl.addEventListener('input', () => { B[ab].c = tcEl.value; render(); dsave(); });
+swEl.addEventListener('input', () => { B[ab].sw = +swEl.value; document.getElementById('swv').textContent = swEl.value; render(); dsave(); });
+scEl.addEventListener('input', () => { B[ab].sc = scEl.value; render(); dsave(); });
+fwEl.addEventListener('input', () => { B[ab].fw = +fwEl.value; document.getElementById('fwv').textContent = fwEl.value; render(); dsave(); });
+
+function sel(i) {
+  ab = i;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  document.querySelector('.tab[data-b="' + i + '"]').classList.add('on');
+  lc(); render();
+}
+function lc() {
+  const b = B[ab];
+  ti.value = b.text;
+  fsEl.value = b.fs; document.getElementById('fsv').textContent = b.fs;
+  lsEl.value = b.ls; document.getElementById('lsv').textContent = b.ls;
+  lhEl.value = Math.round(b.lh * 10); document.getElementById('lhv').textContent = b.lh.toFixed(1);
+  tcEl.value = b.c;
+  swEl.value = b.sw; document.getElementById('swv').textContent = b.sw;
+  scEl.value = b.sc;
+  fwEl.value = b.fw; document.getElementById('fwv').textContent = b.fw;
+  document.getElementById('tb').textContent = b.vis ? '非表示' : '表示';
+}
+function tog() { B[ab].vis = !B[ab].vis; document.getElementById('tb').textContent = B[ab].vis ? '非表示' : '表示'; render(); dsave(); }
+function rst() { B[ab].x = ab * 180 + 20; B[ab].y = 20; render(); dsave(); }
+
+function render() {
+  for (let i = 0; i < 2; i++) {
+    const b = B[i], e = els[i];
+    if (!b.vis) { e.style.display = 'none'; continue; }
+    e.style.display = 'block'; e.style.left = b.x + 'px'; e.style.top = b.y + 'px';
+    e.style.fontSize = b.fs + 'px'; e.style.letterSpacing = b.ls + 'px'; e.style.lineHeight = b.lh;
+    e.style.color = b.c; e.style.fontWeight = b.fw;
+    if (b.sw > 0) {
+      e.style.webkitTextStroke = b.sw + 'px ' + b.sc;
+      e.style.paintOrder = 'stroke fill';
+    } else {
+      e.style.webkitTextStroke = 'none';
     }
-    e.innerHTML=buildVerticalHTML(b.text);
-    e.className='text-box'+(i===ab?' active':'');
+    e.innerHTML = buildVerticalHTML(b.text, b.fs);
+    e.className = 'text-box' + (i === ab ? ' active' : '');
   }
 }
 
-function gp(e){return e.touches?{x:e.touches[0].clientX,y:e.touches[0].clientY}:{x:e.clientX,y:e.clientY};}
-function sd(e,i){e.preventDefault();ab=i;sel(i);drag=true;const p=gp(e),r=cw.getBoundingClientRect();dx=p.x-r.left-B[i].x;dy=p.y-r.top-B[i].y;els[i].classList.add('dragging');}
-function md(e){if(!drag)return;e.preventDefault();const p=gp(e),r=cw.getBoundingClientRect();B[ab].x=Math.max(0,p.x-r.left-dx);B[ab].y=Math.max(0,p.y-r.top-dy);render();}
-function ed(){if(!drag)return;drag=false;els.forEach(e=>e.classList.remove('dragging'));debounceSave();}
-els.forEach((e,i)=>{e.addEventListener('mousedown',ev=>sd(ev,i));e.addEventListener('touchstart',ev=>sd(ev,i),{passive:false});});
-document.addEventListener('mousemove',md);document.addEventListener('touchmove',md,{passive:false});
-document.addEventListener('mouseup',ed);document.addEventListener('touchend',ed);
+// ---- Drag + Tap to edit ----
+function gp(e) { return e.touches ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : { x: e.clientX, y: e.clientY }; }
 
-// Export with proper vertical text rendering
-function exp(){
-  if(!img.src||!img.naturalWidth){alert('画像を先にアップロードしてください');return;}
-  const cv=document.createElement('canvas'),cx=cv.getContext('2d');
-  const nw=img.naturalWidth,nh=img.naturalHeight;cv.width=nw;cv.height=nh;
-  cx.drawImage(img,0,0,nw,nh);
-  const sx=nw/img.clientWidth,sy=nh/img.clientHeight;
+function sd(e, i) {
+  e.preventDefault();
+  if (ab !== i) sel(i); else { ab = i; lc(); render(); }
+  drag = true; dragMoved = false; dragStartTime = Date.now();
+  const p = gp(e), r = cw.getBoundingClientRect();
+  dx = p.x - r.left - B[i].x; dy = p.y - r.top - B[i].y;
+  els[i].classList.add('dragging');
+}
 
-  for(let i=0;i<2;i++){
-    const b=B[i];if(!b.vis||!b.text)continue;
-    const fz=b.fs*sy,lsp=b.ls*sy,stw=b.sw*sy;
-    cx.textBaseline='top';
+function mdd(e) {
+  if (!drag) return;
+  e.preventDefault();
+  dragMoved = true;
+  const p = gp(e), r = cw.getBoundingClientRect();
+  B[ab].x = Math.max(0, p.x - r.left - dx);
+  B[ab].y = Math.max(0, p.y - r.top - dy);
+  render();
+}
 
-    const lines=b.text.split('\n');
-    let colX=b.x*sx;
+function ed() {
+  if (!drag) return;
+  drag = false;
+  els.forEach(e => e.classList.remove('dragging'));
+  const elapsed = Date.now() - dragStartTime;
+  // Tap detection: short duration and no significant movement
+  if (!dragMoved && elapsed < 300) {
+    // Focus the textarea for editing
+    ti.focus();
+    ti.setSelectionRange(ti.value.length, ti.value.length);
+  }
+  dsave();
+}
 
-    for(let li=0;li<lines.length;li++){
-      const chars=Array.from(lines[li]);
-      let charY=b.y*sy;
+els.forEach((e, i) => {
+  e.addEventListener('mousedown', ev => sd(ev, i));
+  e.addEventListener('touchstart', ev => sd(ev, i), { passive: false });
+});
+document.addEventListener('mousemove', mdd);
+document.addEventListener('touchmove', mdd, { passive: false });
+document.addEventListener('mouseup', ed);
+document.addEventListener('touchend', ed);
 
-      for(let ci=0;ci<chars.length;ci++){
-        const ch=chars[ci];
-        const isRot=shouldRotate(ch);
+// ---- Export ----
+function exp() {
+  if (!img.src || !img.naturalWidth) { alert('画像を先にアップロードしてください'); return; }
+  const cv = document.createElement('canvas'), cx = cv.getContext('2d');
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  cv.width = nw; cv.height = nh;
+  cx.drawImage(img, 0, 0, nw, nh);
+  const sx = nw / img.clientWidth, sy = nh / img.clientHeight;
+
+  for (let i = 0; i < 2; i++) {
+    const b = B[i]; if (!b.vis || !b.text) continue;
+    const fz = b.fs * sy, lsp = b.ls * sy, stw = b.sw * sy;
+    cx.textBaseline = 'middle'; cx.textAlign = 'center';
+    cx.font = b.fw + ' ' + fz + 'px "M PLUS Rounded 1c", sans-serif';
+
+    const lines = b.text.split('\n');
+    let colX = b.x * sx + fz * 0.5;
+
+    for (let li = 0; li < lines.length; li++) {
+      const chars = Array.from(lines[li]);
+      let charY = b.y * sy + fz * 0.5;
+
+      for (let ci = 0; ci < chars.length; ci++) {
+        const ch = chars[ci];
+        const cfg = getCfg(ch);
 
         cx.save();
 
-        cx.font=b.fw+' '+fz+'px "M PLUS Rounded 1c", sans-serif';
-
-        if(isRot){
-          // Rotate 90deg clockwise around character center
-          const mx=colX+fz*0.5;
-          const my=charY+fz*0.5;
-          cx.translate(mx,my);
-          cx.rotate(Math.PI/2);
-          cx.translate(-mx,-my);
+        if (cfg && cfg.rot !== 0) {
+          const dxPx = (cfg.dx || 0) * fz;
+          const dyPx = (cfg.dy || 0) * fz;
+          cx.translate(colX + dxPx, charY + dyPx);
+          cx.rotate(cfg.rot * Math.PI / 180);
+        } else {
+          cx.translate(colX, charY);
         }
 
-        if(stw>0){cx.strokeStyle=b.sc;cx.lineWidth=stw*2;cx.lineJoin='round';cx.strokeText(ch,colX,charY);}
-        cx.fillStyle=b.c;cx.fillText(ch,colX,charY);
+        if (stw > 0) {
+          cx.strokeStyle = b.sc; cx.lineWidth = stw * 2; cx.lineJoin = 'round';
+          cx.strokeText(ch, 0, 0);
+        }
+        cx.fillStyle = b.c;
+        cx.fillText(ch, 0, 0);
 
         cx.restore();
-        charY+=fz+lsp;
+        charY += fz + lsp;
       }
-      colX+=fz*b.lh;
+      colX += fz * b.lh;
     }
   }
-  const a=document.createElement('a');a.download='text_overlay.png';a.href=cv.toDataURL('image/png');a.click();
+  const a = document.createElement('a'); a.download = 'text_overlay.png'; a.href = cv.toDataURL('image/png'); a.click();
 }
 
-lc();render();
+// Init
+lc(); render();
 </script>
 </body>
 </html>
