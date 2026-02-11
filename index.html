@@ -6,82 +6,69 @@
 <title>文字入れツール</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800;900&display=swap');
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    background: #1a1a2e; color: #e0e0e0;
-    font-family: 'M PLUS Rounded 1c', sans-serif;
-    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#1a1a2e;color:#e0e0e0;font-family:'M PLUS Rounded 1c',sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center}
+  h1{font-size:1.1rem;padding:10px 0 4px;color:#a0a0c0;letter-spacing:.1em}
+  .app{display:flex;gap:14px;padding:10px;width:100%;max-width:1400px;flex-wrap:wrap;justify-content:center}
+  .canvas-wrap{position:relative;flex-shrink:0;background:#000;border-radius:8px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.5)}
+  .canvas-wrap img{display:block;max-height:82vh;max-width:min(100%,600px);width:auto;height:auto}
+  .text-box{
+    position:absolute;cursor:grab;
+    writing-mode:vertical-rl;
+    user-select:none;
+    font-family:'M PLUS Rounded 1c',sans-serif;font-weight:800;
+    z-index:10;padding:4px;
+    white-space:pre-wrap;
+    line-height:1;
   }
-  h1 { font-size: 1.1rem; padding: 10px 0 4px; color: #a0a0c0; letter-spacing: 0.1em; }
-  .app { display: flex; gap: 14px; padding: 10px; width: 100%; max-width: 1400px; flex-wrap: wrap; justify-content: center; }
-  .canvas-wrap { position: relative; flex-shrink: 0; background: #000; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 24px rgba(0,0,0,0.5); }
-  .canvas-wrap img { display: block; max-height: 82vh; max-width: min(100%, 600px); width: auto; height: auto; }
-
-  /* Text box container - NO writing-mode here, we handle layout manually */
-  .text-box {
-    position: absolute; cursor: grab;
-    user-select: none; z-index: 10; padding: 4px;
-    font-family: 'M PLUS Rounded 1c', sans-serif;
+  .text-box.active{outline:2px dashed rgba(255,255,255,.5)}
+  .text-box.dragging{cursor:grabbing;opacity:.85}
+  /* Rotated chars: inline-block 1em box, content rotated inside */
+  .vr{
+    display:inline-block;
+    width:1em;height:1em;
+    text-align:center;
+    vertical-align:top;
+    text-orientation:mixed;
+    position:relative;
+    line-height:1em;
   }
-  .text-box.active { outline: 2px dashed rgba(255,255,255,0.5); }
-  .text-box.dragging { cursor: grabbing; opacity: 0.85; }
-
-  /* Each column is a flex column */
-  .v-columns { display: flex; flex-direction: row-reverse; align-items: flex-start; }
-  .v-col { display: flex; flex-direction: column; align-items: center; }
-  .v-cell {
-    display: flex; align-items: center; justify-content: center;
-    overflow: visible; position: relative;
+  .vr>span{
+    display:block;
+    position:absolute;
+    top:0;left:0;right:0;bottom:0;
+    display:flex;align-items:center;justify-content:center;
+    transform:rotate(90deg);
+    line-height:1;
   }
-  .v-cell span {
-    display: block; text-align: center; line-height: 1;
-  }
-  .v-cell.rot span {
-    transform: rotate(90deg);
-    white-space: nowrap;
-  }
-
-  .ctrl {
-    background: #16213e; border-radius: 10px; padding: 14px; min-width: 290px; max-width: 360px;
-    display: flex; flex-direction: column; gap: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-    max-height: 88vh; overflow-y: auto;
-  }
-  .stitle { font-size: 0.8rem; color: #7a7aaf; border-bottom: 1px solid #2a2a4a; padding-bottom: 3px; font-weight: 700; }
-  .tabs { display: flex; gap: 5px; }
-  .tab {
-    flex: 1; padding: 7px 10px; border: 2px solid #3a3a6a; background: transparent;
-    color: #a0a0c0; border-radius: 7px; cursor: pointer; font-family: inherit; font-weight: 700; font-size: 0.82rem; transition: all 0.2s;
-  }
-  .tab.on { background: #3a3a6a; color: #fff; border-color: #6a6aaf; }
-  .tab:hover { border-color: #6a6aaf; }
-  .cg { display: flex; flex-direction: column; gap: 5px; }
-  label { font-size: 0.78rem; color: #9090b0; font-weight: 700; }
-  textarea {
-    background: #0f1a30; border: 1px solid #3a3a6a; border-radius: 7px; color: #e0e0e0;
-    padding: 8px; font-family: inherit; font-size: 0.9rem; resize: vertical; min-height: 70px;
-    writing-mode: vertical-rl; line-height: 1.8;
-  }
-  textarea:focus { outline: none; border-color: #6a6aaf; }
-  input[type="range"] { width: 100%; accent-color: #6a6aaf; }
-  input[type="color"] { width: 44px; height: 30px; border: 2px solid #3a3a6a; border-radius: 5px; background: transparent; cursor: pointer; padding: 2px; }
-  .row { display: flex; align-items: center; gap: 8px; }
-  .row label { min-width: 76px; }
-  .vd { font-size: 0.78rem; color: #6a6aaf; min-width: 34px; text-align: right; }
-  .btn { padding: 7px 14px; border: none; border-radius: 7px; cursor: pointer; font-family: inherit; font-weight: 700; font-size: 0.82rem; transition: all 0.2s; }
-  .bp { background: #4a4a8a; color: #fff; } .bp:hover { background: #5a5a9a; }
-  .bd { background: #6a2a2a; color: #e0a0a0; } .bd:hover { background: #7a3a3a; }
-  .be { background: #2a6a4a; color: #a0e0c0; width: 100%; padding: 11px; font-size: 0.95rem; margin-top: 6px; } .be:hover { background: #3a7a5a; }
-  .upload { border: 2px dashed #3a3a6a; border-radius: 7px; padding: 16px; text-align: center; cursor: pointer; color: #7a7aaf; font-size: 0.82rem; } .upload:hover { border-color: #6a6aaf; }
-  .ar { display: flex; gap: 5px; } .ar .btn { flex: 1; }
-  .save-note { font-size: 0.68rem; color: #4a6a4a; text-align: center; padding: 2px; }
+  .ctrl{background:#16213e;border-radius:10px;padding:14px;min-width:290px;max-width:360px;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.4);max-height:88vh;overflow-y:auto}
+  .stitle{font-size:.8rem;color:#7a7aaf;border-bottom:1px solid #2a2a4a;padding-bottom:3px;font-weight:700}
+  .tabs{display:flex;gap:5px}
+  .tab{flex:1;padding:7px 10px;border:2px solid #3a3a6a;background:transparent;color:#a0a0c0;border-radius:7px;cursor:pointer;font-family:inherit;font-weight:700;font-size:.82rem;transition:all .2s}
+  .tab.on{background:#3a3a6a;color:#fff;border-color:#6a6aaf}
+  .tab:hover{border-color:#6a6aaf}
+  .cg{display:flex;flex-direction:column;gap:5px}
+  label{font-size:.78rem;color:#9090b0;font-weight:700}
+  textarea{background:#0f1a30;border:1px solid #3a3a6a;border-radius:7px;color:#e0e0e0;padding:8px;font-family:inherit;font-size:.9rem;resize:vertical;min-height:70px;writing-mode:vertical-rl;line-height:1.8}
+  textarea:focus{outline:none;border-color:#6a6aaf}
+  input[type="range"]{width:100%;accent-color:#6a6aaf}
+  input[type="color"]{width:44px;height:30px;border:2px solid #3a3a6a;border-radius:5px;background:transparent;cursor:pointer;padding:2px}
+  .row{display:flex;align-items:center;gap:8px}
+  .row label{min-width:76px}
+  .vd{font-size:.78rem;color:#6a6aaf;min-width:34px;text-align:right}
+  .btn{padding:7px 14px;border:none;border-radius:7px;cursor:pointer;font-family:inherit;font-weight:700;font-size:.82rem;transition:all .2s}
+  .bp{background:#4a4a8a;color:#fff}.bp:hover{background:#5a5a9a}
+  .bd{background:#6a2a2a;color:#e0a0a0}.bd:hover{background:#7a3a3a}
+  .be{background:#2a6a4a;color:#a0e0c0;width:100%;padding:11px;font-size:.95rem;margin-top:6px}.be:hover{background:#3a7a5a}
+  .upload{border:2px dashed #3a3a6a;border-radius:7px;padding:16px;text-align:center;cursor:pointer;color:#7a7aaf;font-size:.82rem}.upload:hover{border-color:#6a6aaf}
+  .ar{display:flex;gap:5px}.ar .btn{flex:1}
+  .save-note{font-size:.68rem;color:#4a6a4a;text-align:center;padding:2px}
 </style>
 </head>
 <body>
 <h1>縦書き文字入れツール</h1>
 <div class="app">
-  <div class="canvas-wrap" id="cw">
-    <img id="img" src="" alt="画像をアップロード">
-  </div>
+  <div class="canvas-wrap" id="cw"><img id="img" src="" alt="画像をアップロード"></div>
   <div class="ctrl">
     <div class="cg">
       <div class="stitle">画像</div>
@@ -118,84 +105,55 @@
   </div>
 </div>
 <script>
-// ---- Rotation set ----
-const ROT_SET = new Set([
+// Only truly horizontal chars that MUST rotate.
+// 「」『』（）【】 etc are CJK and render correctly upright with text-orientation:upright via font vert feature.
+// We only rotate chars that are inherently horizontal.
+const ROT_SET=new Set([
   '…','‥',
   'ー','〜','～','—','―','–','－','-',
-  '（','）','(',')','{','}','｛','｝','[',']','［','］',
-  '【','】','〔','〕','〈','〉','《','》',
-  '＜','＞','<','>',
-  '→','←','↑','↓','⇒','⇐','⇔',
-  '＝','=','≠','≒','≡','÷','×','±','∞',
-  '／','＼','/','\\',
+  '＝','=','÷','×','±',
   '＿','_','‐','‑','‒',
-  '．','，','.',','
+  '→','←','⇒','⇐','⇔',
 ]);
-function needsRot(ch) { return ROT_SET.has(ch); }
 
-function escH(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function needsRot(ch){return ROT_SET.has(ch);}
 
-// Build DOM-based vertical columns
-function buildColumns(text, fs, lsp, lh, color, sw, sc, fw) {
-  const wrap = document.createElement('div');
-  wrap.className = 'v-columns';
-  const cellSize = fs;
-  const gap = lsp;
-  const colGap = fs * (lh - 1);
+function escH(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
-  const lines = text.split('\n');
-  for (let li = 0; li < lines.length; li++) {
-    const col = document.createElement('div');
-    col.className = 'v-col';
-    col.style.marginLeft = li > 0 ? colGap + 'px' : '0';
-
-    const chars = Array.from(lines[li]);
-    for (let ci = 0; ci < chars.length; ci++) {
-      const ch = chars[ci];
-      const cell = document.createElement('div');
-      cell.className = 'v-cell' + (needsRot(ch) ? ' rot' : '');
-      cell.style.width = cellSize + 'px';
-      cell.style.height = cellSize + 'px';
-      cell.style.marginBottom = ci < chars.length - 1 ? gap + 'px' : '0';
-      cell.style.fontSize = fs + 'px';
-      cell.style.fontWeight = fw;
-      cell.style.color = color;
-      if (sw > 0) {
-        cell.style.webkitTextStroke = sw + 'px ' + sc;
-        cell.style.paintOrder = 'stroke fill';
-      }
-
-      const span = document.createElement('span');
-      span.textContent = ch;
-      cell.appendChild(span);
-      col.appendChild(cell);
+// Build HTML: only wrap chars that truly need rotation
+function buildHTML(text){
+  let h='';
+  const chars=Array.from(text);
+  for(const ch of chars){
+    if(ch==='\n'){h+='<br>';continue;}
+    if(needsRot(ch)){
+      h+='<span class="vr"><span>'+escH(ch)+'</span></span>';
+    } else {
+      h+=escH(ch);
     }
-    wrap.appendChild(col);
   }
-  return wrap;
+  return h;
 }
 
-// ---- State ----
-const DEFAULTS = [
+const DEFAULTS=[
   {text:'「そう、それで？」\nいりすの目が僕を見つめる…。',x:20,y:20,fs:28,ls:2,lh:1.6,c:'#ffffff',sw:2,sc:'#000000',fw:800,vis:true},
   {text:'ああー僕は「生き残れる」のか\nそれとも「このまま」ここで',x:90,y:20,fs:24,ls:2,lh:1.6,c:'#ffffff',sw:2,sc:'#000000',fw:800,vis:true}
 ];
 
-function loadState() {
-  try { const s=localStorage.getItem('tov4'); if(s){const p=JSON.parse(s); if(Array.isArray(p)&&p.length===2) return p;} } catch(e){}
+function loadState(){
+  try{const s=localStorage.getItem('tov5');if(s){const p=JSON.parse(s);if(Array.isArray(p)&&p.length===2)return p;}}catch(e){}
   return JSON.parse(JSON.stringify(DEFAULTS));
 }
-function saveState() {
-  try { localStorage.setItem('tov4',JSON.stringify(B));
-    const el=document.getElementById('saveStatus'); el.textContent='保存しました'; el.style.color='#6aaf6a';
-    clearTimeout(saveState._t); saveState._t=setTimeout(()=>{el.textContent='設定は自動保存されます';el.style.color='#4a6a4a';},1200);
-  } catch(e){}
+function saveState(){
+  try{localStorage.setItem('tov5',JSON.stringify(B));
+    const el=document.getElementById('saveStatus');el.textContent='保存しました';el.style.color='#6aaf6a';
+    clearTimeout(saveState._t);saveState._t=setTimeout(()=>{el.textContent='設定は自動保存されます';el.style.color='#4a6a4a';},1200);
+  }catch(e){}
 }
-let svT=null;
-function dsave(){clearTimeout(svT);svT=setTimeout(saveState,400);}
+let svT=null;function dsave(){clearTimeout(svT);svT=setTimeout(saveState,400);}
 
 const B=loadState();
-let ab=0,drag=false,ddx=0,ddy=0,dragStartTime=0,dragMoved=false;
+let ab=0,drag=false,ddx=0,ddy=0,dragStart=0,dragMoved=false;
 const cw=document.getElementById('cw'),img=document.getElementById('img');
 const els=[];
 for(let i=0;i<2;i++){const e=document.createElement('div');e.className='text-box';e.dataset.i=i;cw.appendChild(e);els.push(e);}
@@ -222,12 +180,12 @@ fwEl.addEventListener('input',()=>{B[ab].fw=+fwEl.value;document.getElementById(
 
 function sel(i){ab=i;document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.querySelector('.tab[data-b="'+i+'"]').classList.add('on');lc();render();}
 function lc(){
-  const b=B[ab]; ti.value=b.text;
+  const b=B[ab];ti.value=b.text;
   fsEl.value=b.fs;document.getElementById('fsv').textContent=b.fs;
   lsEl.value=b.ls;document.getElementById('lsv').textContent=b.ls;
   lhEl.value=Math.round(b.lh*10);document.getElementById('lhv').textContent=b.lh.toFixed(1);
-  tcEl.value=b.c; swEl.value=b.sw;document.getElementById('swv').textContent=b.sw;
-  scEl.value=b.sc; fwEl.value=b.fw;document.getElementById('fwv').textContent=b.fw;
+  tcEl.value=b.c;swEl.value=b.sw;document.getElementById('swv').textContent=b.sw;
+  scEl.value=b.sc;fwEl.value=b.fw;document.getElementById('fwv').textContent=b.fw;
   document.getElementById('tb').textContent=b.vis?'非表示':'表示';
 }
 function tog(){B[ab].vis=!B[ab].vis;document.getElementById('tb').textContent=B[ab].vis?'非表示':'表示';render();dsave();}
@@ -237,48 +195,44 @@ function render(){
   for(let i=0;i<2;i++){
     const b=B[i],e=els[i];
     if(!b.vis){e.style.display='none';continue;}
-    e.style.display='block';e.style.left=b.x+'px';e.style.top=b.y+'px';
-    e.style.fontFamily="'M PLUS Rounded 1c', sans-serif";
-    // Clear and rebuild
-    e.innerHTML='';
-    e.appendChild(buildColumns(b.text,b.fs,b.ls,b.lh,b.c,b.sw,b.sc,b.fw));
+    e.style.display='block';
+    e.style.left=b.x+'px';e.style.top=b.y+'px';
+    e.style.fontSize=b.fs+'px';
+    e.style.letterSpacing=b.ls+'px';
+    e.style.lineHeight=b.lh;
+    e.style.color=b.c;e.style.fontWeight=b.fw;
+    if(b.sw>0){e.style.webkitTextStroke=b.sw+'px '+b.sc;e.style.paintOrder='stroke fill';}
+    else{e.style.webkitTextStroke='none';}
+    e.innerHTML=buildHTML(b.text);
     e.className='text-box'+(i===ab?' active':'');
   }
 }
 
-// Drag + tap
 function gp(e){return e.touches?{x:e.touches[0].clientX,y:e.touches[0].clientY}:{x:e.clientX,y:e.clientY};}
-function sd(e,i){e.preventDefault();sel(i);drag=true;dragMoved=false;dragStartTime=Date.now();const p=gp(e),r=cw.getBoundingClientRect();ddx=p.x-r.left-B[i].x;ddy=p.y-r.top-B[i].y;els[i].classList.add('dragging');}
+function sd(e,i){e.preventDefault();sel(i);drag=true;dragMoved=false;dragStart=Date.now();const p=gp(e),r=cw.getBoundingClientRect();ddx=p.x-r.left-B[i].x;ddy=p.y-r.top-B[i].y;els[i].classList.add('dragging');}
 function mdd(e){if(!drag)return;e.preventDefault();dragMoved=true;const p=gp(e),r=cw.getBoundingClientRect();B[ab].x=Math.max(0,p.x-r.left-ddx);B[ab].y=Math.max(0,p.y-r.top-ddy);render();}
-function ed(){if(!drag)return;drag=false;els.forEach(e=>e.classList.remove('dragging'));if(!dragMoved&&(Date.now()-dragStartTime)<300){ti.focus();ti.setSelectionRange(ti.value.length,ti.value.length);}dsave();}
+function ed(){if(!drag)return;drag=false;els.forEach(e=>e.classList.remove('dragging'));if(!dragMoved&&(Date.now()-dragStart)<300){ti.focus();ti.setSelectionRange(ti.value.length,ti.value.length);}dsave();}
 els.forEach((e,i)=>{e.addEventListener('mousedown',ev=>sd(ev,i));e.addEventListener('touchstart',ev=>sd(ev,i),{passive:false});});
 document.addEventListener('mousemove',mdd);document.addEventListener('touchmove',mdd,{passive:false});
 document.addEventListener('mouseup',ed);document.addEventListener('touchend',ed);
 
-// ---- Export (canvas) ----
+// Export
 function exp(){
   if(!img.src||!img.naturalWidth){alert('画像を先にアップロードしてください');return;}
   const cv=document.createElement('canvas'),cx=cv.getContext('2d');
-  const nw=img.naturalWidth,nh=img.naturalHeight; cv.width=nw;cv.height=nh;
+  const nw=img.naturalWidth,nh=img.naturalHeight;cv.width=nw;cv.height=nh;
   cx.drawImage(img,0,0,nw,nh);
   const sx=nw/img.clientWidth,sy=nh/img.clientHeight;
 
   for(let i=0;i<2;i++){
-    const b=B[i]; if(!b.vis||!b.text) continue;
-    const fz=b.fs*sy, lsp=b.ls*sy, stw=b.sw*sy;
-    const colGap=fz*(b.lh-1);
-    cx.font=b.fw+' '+fz+'px "M PLUS Rounded 1c", sans-serif';
-    cx.textBaseline='middle'; cx.textAlign='center';
+    const b=B[i];if(!b.vis||!b.text)continue;
+    const fz=b.fs*sy,lsp=b.ls*sy,stw=b.sw*sy;
+    cx.font=b.fw+' '+fz+'px "M PLUS Rounded 1c",sans-serif';
+    cx.textBaseline='middle';cx.textAlign='center';
 
     const lines=b.text.split('\n');
-    // vertical-rl: first line is rightmost. With flex row-reverse in DOM,
-    // but for canvas we go left to right matching DOM visual order (rightmost = first line)
-    // Actually in our DOM, row-reverse means first line is on the right.
-    // For canvas, let's compute total width first then draw right-to-left.
-    const totalCols=lines.length;
-    const totalWidth=(totalCols*fz)+((totalCols-1)*colGap);
-    // rightmost column = lines[0]
-    let colX=b.x*sx + totalWidth - fz*0.5;
+    // vertical-rl: first line rightmost
+    let colX=b.x*sx+fz*0.5;
 
     for(let li=0;li<lines.length;li++){
       const chars=Array.from(lines[li]);
@@ -287,13 +241,13 @@ function exp(){
         const ch=chars[ci];
         cx.save();
         cx.translate(colX,charY);
-        if(needsRot(ch)) cx.rotate(Math.PI/2);
+        if(needsRot(ch))cx.rotate(Math.PI/2);
         if(stw>0){cx.strokeStyle=b.sc;cx.lineWidth=stw*2;cx.lineJoin='round';cx.strokeText(ch,0,0);}
         cx.fillStyle=b.c;cx.fillText(ch,0,0);
         cx.restore();
         charY+=fz+lsp;
       }
-      colX-=fz+colGap;
+      colX+=fz*b.lh;
     }
   }
   const a=document.createElement('a');a.download='text_overlay.png';a.href=cv.toDataURL('image/png');a.click();
