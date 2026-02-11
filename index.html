@@ -8,13 +8,9 @@
   @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800;900&display=swap');
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: #1a1a2e; color: #e0e0e0;
     font-family: 'M PLUS Rounded 1c', sans-serif;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center;
   }
   h1 { font-size: 1.1rem; padding: 10px 0 4px; color: #a0a0c0; letter-spacing: 0.1em; }
   .app { display: flex; gap: 14px; padding: 10px; width: 100%; max-width: 1400px; flex-wrap: wrap; justify-content: center; }
@@ -27,6 +23,8 @@
   }
   .text-box.active { outline: 2px dashed rgba(255,255,255,0.5); }
   .text-box.dragging { cursor: grabbing; opacity: 0.85; }
+  /* Rotate specific chars for proper vertical display */
+  .text-box .rot { display: inline-block; transform: rotate(90deg); transform-origin: center center; }
   .ctrl {
     background: #16213e; border-radius: 10px; padding: 14px; min-width: 290px; max-width: 360px;
     display: flex; flex-direction: column; gap: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.4);
@@ -70,6 +68,7 @@
   .upload:hover { border-color: #6a6aaf; }
   .ar { display: flex; gap: 5px; }
   .ar .btn { flex: 1; }
+  .save-note { font-size: 0.68rem; color: #4a6a4a; text-align: center; padding: 2px; }
 </style>
 </head>
 <body>
@@ -120,15 +119,93 @@
       <button class="btn bd" onclick="rst()">位置リセット</button>
     </div>
     <button class="btn be" onclick="exp()">画像として保存</button>
+    <div class="save-note" id="saveStatus">設定は自動保存されます</div>
   </div>
 </div>
 <script>
-const B=[
+// Characters that need 90deg rotation in vertical writing
+const ROT_CHARS = new Set([
+  '…','‥','ー','〜','～','-','－','—','―','–',
+  '（','）','(',')','{','}','｛','｝','[',']','［','］',
+  '【','】','〔','〕','〈','〉','《','》','「','」','『','』',
+  '＜','＞','<','>',
+  '→','←','↑','↓','⇒','⇐','⇔',
+  '＝','=','≠','≒','≡',
+  '÷','×','±','∞',
+  '／','＼','/','\\',
+  '｜','|',
+  '＿','_','‐','‑','‒',
+  '．','，','.', ','
+]);
+
+// Check if char should be rotated
+function shouldRotate(ch) {
+  return ROT_CHARS.has(ch);
+}
+
+// Build innerHTML with rotation spans
+function buildVerticalHTML(text) {
+  let html = '';
+  const chars = Array.from(text);
+  for (const ch of chars) {
+    if (ch === '\n') {
+      html += '<br>';
+    } else if (shouldRotate(ch)) {
+      // Don't rotate - these are already handled by text-orientation upright
+      // Actually we need the OPPOSITE: force sideways for these chars
+      // In vertical-rl + text-orientation:mixed, CJK is upright, latin is sideways
+      // But …ー etc are treated as upright by mixed, we want them rotated
+      // We'll use text-combine-upright or just manually rotate
+      html += '<span style="display:inline-block;text-orientation:sideways;">' + escHTML(ch) + '</span>';
+    } else {
+      html += escHTML(ch);
+    }
+  }
+  return html;
+}
+
+function escHTML(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+const DEFAULTS = [
   {text:'\u300c\u305d\u3046\u3001\u305d\u308c\u3067\uff1f\u300d\n\u3044\u308a\u3059\u306e\u76ee\u304c\u50d5\u3092\u898b\u3064\u3081\u308b\u2026\u3002',x:20,y:20,fs:28,ls:2,lh:1.6,c:'#ffffff',sw:2,sc:'#000000',fw:800,vis:true},
   {text:'\u3042\u3042\u30fc\u50d5\u306f\u300c\u751f\u304d\u6b8b\u308c\u308b\u300d\u306e\u304b\n\u305d\u308c\u3068\u3082\u300c\u3053\u306e\u307e\u307e\u300d\u3053\u3053\u3067',x:200,y:20,fs:24,ls:2,lh:1.6,c:'#ffffff',sw:2,sc:'#000000',fw:800,vis:false}
 ];
-let ab=0,drag=false,dx=0,dy=0;
-const cw=document.getElementById('cw'),img=document.getElementById('img');
+
+// Load from localStorage or use defaults
+function loadState() {
+  try {
+    const saved = localStorage.getItem('textOverlayState');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length === 2) return parsed;
+    }
+  } catch(e) {}
+  return JSON.parse(JSON.stringify(DEFAULTS));
+}
+
+function saveState() {
+  try {
+    localStorage.setItem('textOverlayState', JSON.stringify(B));
+    const el = document.getElementById('saveStatus');
+    el.textContent = '保存しました';
+    el.style.color = '#6aaf6a';
+    clearTimeout(saveState._t);
+    saveState._t = setTimeout(() => { el.textContent = '設定は自動保存されます'; el.style.color = '#4a6a4a'; }, 1500);
+  } catch(e) {}
+}
+
+// Debounced save
+let saveTimer = null;
+function debounceSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveState, 400);
+}
+
+const B = loadState();
+let ab=0, drag=false, dx=0, dy=0;
+const cw=document.getElementById('cw'), img=document.getElementById('img');
 const els=[];
 for(let i=0;i<2;i++){const e=document.createElement('div');e.className='text-box';e.dataset.i=i;cw.appendChild(e);els.push(e);}
 
@@ -139,20 +216,31 @@ ua.addEventListener('dragleave',()=>{ua.style.borderColor='#3a3a6a';});
 ua.addEventListener('drop',e=>{e.preventDefault();ua.style.borderColor='#3a3a6a';const f=e.dataTransfer.files[0];if(f&&f.type.startsWith('image/'))loadImg(f);});
 function loadImg(f){const r=new FileReader();r.onload=e=>{img.src=e.target.result;ua.textContent=f.name;};r.readAsDataURL(f);}
 
-const ti=document.getElementById('ti'),fs=document.getElementById('fs'),ls=document.getElementById('ls'),lh=document.getElementById('lh'),tc=document.getElementById('tc'),sw=document.getElementById('sw'),sc=document.getElementById('sc'),fw=document.getElementById('fw');
-ti.addEventListener('input',()=>{B[ab].text=ti.value;render();});
-fs.addEventListener('input',()=>{B[ab].fs=+fs.value;document.getElementById('fsv').textContent=fs.value;render();});
-ls.addEventListener('input',()=>{B[ab].ls=+ls.value;document.getElementById('lsv').textContent=ls.value;render();});
-lh.addEventListener('input',()=>{B[ab].lh=+lh.value/10;document.getElementById('lhv').textContent=(+lh.value/10).toFixed(1);render();});
-tc.addEventListener('input',()=>{B[ab].c=tc.value;render();});
-sw.addEventListener('input',()=>{B[ab].sw=+sw.value;document.getElementById('swv').textContent=sw.value;render();});
-sc.addEventListener('input',()=>{B[ab].sc=sc.value;render();});
-fw.addEventListener('input',()=>{B[ab].fw=+fw.value;document.getElementById('fwv').textContent=fw.value;render();});
+const ti=document.getElementById('ti'),fsEl=document.getElementById('fs'),lsEl=document.getElementById('ls'),lhEl=document.getElementById('lh'),tcEl=document.getElementById('tc'),swEl=document.getElementById('sw'),scEl=document.getElementById('sc'),fwEl=document.getElementById('fw');
+ti.addEventListener('input',()=>{B[ab].text=ti.value;render();debounceSave();});
+fsEl.addEventListener('input',()=>{B[ab].fs=+fsEl.value;document.getElementById('fsv').textContent=fsEl.value;render();debounceSave();});
+lsEl.addEventListener('input',()=>{B[ab].ls=+lsEl.value;document.getElementById('lsv').textContent=lsEl.value;render();debounceSave();});
+lhEl.addEventListener('input',()=>{B[ab].lh=+lhEl.value/10;document.getElementById('lhv').textContent=(+lhEl.value/10).toFixed(1);render();debounceSave();});
+tcEl.addEventListener('input',()=>{B[ab].c=tcEl.value;render();debounceSave();});
+swEl.addEventListener('input',()=>{B[ab].sw=+swEl.value;document.getElementById('swv').textContent=swEl.value;render();debounceSave();});
+scEl.addEventListener('input',()=>{B[ab].sc=scEl.value;render();debounceSave();});
+fwEl.addEventListener('input',()=>{B[ab].fw=+fwEl.value;document.getElementById('fwv').textContent=fwEl.value;render();debounceSave();});
 
 function sel(i){ab=i;document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));document.querySelector('.tab[data-b="'+i+'"]').classList.add('on');lc();render();}
-function lc(){const b=B[ab];ti.value=b.text;fs.value=b.fs;document.getElementById('fsv').textContent=b.fs;ls.value=b.ls;document.getElementById('lsv').textContent=b.ls;lh.value=Math.round(b.lh*10);document.getElementById('lhv').textContent=b.lh.toFixed(1);tc.value=b.c;sw.value=b.sw;document.getElementById('swv').textContent=b.sw;sc.value=b.sc;fw.value=b.fw;document.getElementById('fwv').textContent=b.fw;document.getElementById('tb').textContent=b.vis?'非表示':'表示';}
-function tog(){B[ab].vis=!B[ab].vis;document.getElementById('tb').textContent=B[ab].vis?'非表示':'表示';render();}
-function rst(){B[ab].x=ab*180+20;B[ab].y=20;render();}
+function lc(){
+  const b=B[ab];
+  ti.value=b.text;
+  fsEl.value=b.fs; document.getElementById('fsv').textContent=b.fs;
+  lsEl.value=b.ls; document.getElementById('lsv').textContent=b.ls;
+  lhEl.value=Math.round(b.lh*10); document.getElementById('lhv').textContent=b.lh.toFixed(1);
+  tcEl.value=b.c;
+  swEl.value=b.sw; document.getElementById('swv').textContent=b.sw;
+  scEl.value=b.sc;
+  fwEl.value=b.fw; document.getElementById('fwv').textContent=b.fw;
+  document.getElementById('tb').textContent=b.vis?'非表示':'表示';
+}
+function tog(){B[ab].vis=!B[ab].vis;document.getElementById('tb').textContent=B[ab].vis?'非表示':'表示';render();debounceSave();}
+function rst(){B[ab].x=ab*180+20;B[ab].y=20;render();debounceSave();}
 
 function render(){
   for(let i=0;i<2;i++){
@@ -161,10 +249,13 @@ function render(){
     e.style.display='block';e.style.left=b.x+'px';e.style.top=b.y+'px';
     e.style.fontSize=b.fs+'px';e.style.letterSpacing=b.ls+'px';e.style.lineHeight=b.lh;
     e.style.color=b.c;e.style.fontWeight=b.fw;
-    if(b.sw>0){e.style.webkitTextStroke=b.sw+'px '+b.sc;e.style.paintOrder='stroke fill';
-      e.style.textShadow=b.sc+' 0 0 '+b.sw+'px,'+b.sc+' 0 0 '+b.sw+'px';
-    }else{e.style.webkitTextStroke='none';e.style.textShadow='none';}
-    e.textContent=b.text;
+    if(b.sw>0){
+      e.style.webkitTextStroke=b.sw+'px '+b.sc;
+      e.style.paintOrder='stroke fill';
+    }else{
+      e.style.webkitTextStroke='none';
+    }
+    e.innerHTML=buildVerticalHTML(b.text);
     e.className='text-box'+(i===ab?' active':'');
   }
 }
@@ -172,27 +263,53 @@ function render(){
 function gp(e){return e.touches?{x:e.touches[0].clientX,y:e.touches[0].clientY}:{x:e.clientX,y:e.clientY};}
 function sd(e,i){e.preventDefault();ab=i;sel(i);drag=true;const p=gp(e),r=cw.getBoundingClientRect();dx=p.x-r.left-B[i].x;dy=p.y-r.top-B[i].y;els[i].classList.add('dragging');}
 function md(e){if(!drag)return;e.preventDefault();const p=gp(e),r=cw.getBoundingClientRect();B[ab].x=Math.max(0,p.x-r.left-dx);B[ab].y=Math.max(0,p.y-r.top-dy);render();}
-function ed(){if(!drag)return;drag=false;els.forEach(e=>e.classList.remove('dragging'));}
+function ed(){if(!drag)return;drag=false;els.forEach(e=>e.classList.remove('dragging'));debounceSave();}
 els.forEach((e,i)=>{e.addEventListener('mousedown',ev=>sd(ev,i));e.addEventListener('touchstart',ev=>sd(ev,i),{passive:false});});
 document.addEventListener('mousemove',md);document.addEventListener('touchmove',md,{passive:false});
 document.addEventListener('mouseup',ed);document.addEventListener('touchend',ed);
 
+// Export with proper vertical text rendering
 function exp(){
   if(!img.src||!img.naturalWidth){alert('画像を先にアップロードしてください');return;}
   const cv=document.createElement('canvas'),cx=cv.getContext('2d');
   const nw=img.naturalWidth,nh=img.naturalHeight;cv.width=nw;cv.height=nh;
   cx.drawImage(img,0,0,nw,nh);
   const sx=nw/img.clientWidth,sy=nh/img.clientHeight;
+
   for(let i=0;i<2;i++){
     const b=B[i];if(!b.vis||!b.text)continue;
     const fz=b.fs*sy,lsp=b.ls*sy,stw=b.sw*sy;
-    cx.font=b.fw+' '+fz+'px "M PLUS Rounded 1c", sans-serif';cx.textBaseline='top';
-    const lines=b.text.split('\n');let colX=b.x*sx;
+    cx.textBaseline='top';
+
+    const lines=b.text.split('\n');
+    let colX=b.x*sx;
+
     for(let li=0;li<lines.length;li++){
-      const ch=Array.from(lines[li]);let cy2=b.y*sy;
-      for(let ci=0;ci<ch.length;ci++){
-        if(stw>0){cx.strokeStyle=b.sc;cx.lineWidth=stw*2;cx.lineJoin='round';cx.strokeText(ch[ci],colX,cy2);}
-        cx.fillStyle=b.c;cx.fillText(ch[ci],colX,cy2);cy2+=fz+lsp;
+      const chars=Array.from(lines[li]);
+      let charY=b.y*sy;
+
+      for(let ci=0;ci<chars.length;ci++){
+        const ch=chars[ci];
+        const isRot=shouldRotate(ch);
+
+        cx.save();
+
+        cx.font=b.fw+' '+fz+'px "M PLUS Rounded 1c", sans-serif';
+
+        if(isRot){
+          // Rotate 90deg clockwise around character center
+          const mx=colX+fz*0.5;
+          const my=charY+fz*0.5;
+          cx.translate(mx,my);
+          cx.rotate(Math.PI/2);
+          cx.translate(-mx,-my);
+        }
+
+        if(stw>0){cx.strokeStyle=b.sc;cx.lineWidth=stw*2;cx.lineJoin='round';cx.strokeText(ch,colX,charY);}
+        cx.fillStyle=b.c;cx.fillText(ch,colX,charY);
+
+        cx.restore();
+        charY+=fz+lsp;
       }
       colX+=fz*b.lh;
     }
@@ -200,7 +317,7 @@ function exp(){
   const a=document.createElement('a');a.download='text_overlay.png';a.href=cv.toDataURL('image/png');a.click();
 }
 
-B[0].vis=true;lc();render();
+lc();render();
 </script>
 </body>
 </html>
